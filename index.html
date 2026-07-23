@@ -618,6 +618,14 @@
       Órdenes
     </button>
 
+    <button class="nav-item" data-view="marketing">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M3 11l18-5v12L3 14v-3z"/>
+        <path d="M11.6 16.8a2 2 0 0 1-3.2 2.4L6 16"/>
+      </svg>
+      Marketing
+    </button>
+
     <span class="nav-section-label">Tienda</span>
 
     <button class="nav-item" data-view="settings">
@@ -827,6 +835,62 @@
     </div>
 
     <!-- ── SETTINGS ── -->
+    <!-- ── MARKETING ── -->
+    <div class="view" id="view-marketing">
+      <div style="margin-bottom:24px">
+        <h2 style="font-size:16px;font-weight:700">Marketing</h2>
+        <p style="font-size:13px;color:var(--gray-600);margin-top:2px">Banner principal, ofertas, cupones y productos destacados de OV</p>
+      </div>
+
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">
+          <span class="card-title">Banner principal (carrusel)</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="addSlideRow()">+ Agregar banner</button>
+            <button class="btn btn-primary btn-sm" onclick="saveHeroSlides()">Guardar banners</button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:20px 24px">
+          <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px">Si cargás más de un banner, rotan automáticamente en la home. Con uno solo, se muestra fijo.</p>
+          <div id="hero-slides-list"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">
+          <span class="card-title">Banner de oferta / cuenta regresiva</span>
+          <button class="btn btn-primary btn-sm" onclick="saveSettingsFrom('marketing-settings-container')">Guardar</button>
+        </div>
+        <div class="card-body" style="padding:20px 24px">
+          <p style="font-size:12px;color:var(--gray-400);margin-bottom:14px">Se muestra como franja arriba de la tienda mientras esté activo y no haya vencido.</p>
+          <div id="marketing-settings-container"><div class="loading">Cargando…</div></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">
+          <span class="card-title">Cupones de descuento</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="addCouponRow()">+ Agregar cupón</button>
+            <button class="btn btn-primary btn-sm" onclick="saveCoupons()">Guardar cupones</button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:20px 24px;overflow-x:auto">
+          <div id="coupons-list"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Productos destacados (carrusel de la home)</span>
+        </div>
+        <div class="card-body" style="padding:20px 24px">
+          <p style="font-size:12px;color:var(--gray-400);margin-bottom:10px">En modo "Automático" (configurado arriba en Banner de oferta) se muestran los más vendidos y esta selección se ignora. En modo "Manual" se muestran los que marques acá.</p>
+          <div id="featured-products-list"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="view" id="view-settings">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
         <div>
@@ -975,7 +1039,7 @@
   let allSettings = [];
 
   // ── NAVIGATION ──
-  const titles = { dashboard:'Dashboard', products:'Productos', orders:'Órdenes', settings:'Configuración' };
+  const titles = { dashboard:'Dashboard', products:'Productos', orders:'Órdenes', settings:'Configuración', marketing:'Marketing' };
 
   function navigate(view) {
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -1260,17 +1324,41 @@
     const { data, error } = await sb.from('page_settings').select('*').order('group_name');
     if (error) { toast('Error cargando configuración', 'error'); return; }
     allSettings = data || [];
-    renderSettings(allSettings);
+    renderSettingsInto('settings-container', allSettings.filter(s => s.group_name !== 'Marketing'));
+    renderSettingsInto('marketing-settings-container', allSettings.filter(s => s.group_name === 'Marketing'));
   }
 
-  function renderSettings(settings) {
+  function settingInputHTML(s) {
+    if (s.key === 'featured_mode') {
+      return `<select class="form-select" id="setting-${s.key}" data-key="${s.key}" style="width:240px">
+        <option value="manual" ${s.value!=='auto'?'selected':''}>Manual (elijo yo los productos)</option>
+        <option value="auto" ${s.value==='auto'?'selected':''}>Automático (más vendidos)</option>
+      </select>`;
+    }
+    if (s.type === 'boolean') {
+      return `<input type="checkbox" id="setting-${s.key}" data-key="${s.key}" data-type="boolean" ${s.value==='true'?'checked':''} style="width:18px;height:18px" />`;
+    }
+    if (s.type === 'datetime') {
+      return `<input type="datetime-local" id="setting-${s.key}" value="${s.value||''}" data-key="${s.key}" />`;
+    }
+    if (s.type === 'color') {
+      return `<input type="color" id="setting-${s.key}" value="${s.value||'#141414'}" data-key="${s.key}" />`;
+    }
+    if (s.type === 'number') {
+      return `<input type="number" id="setting-${s.key}" value="${s.value||''}" data-key="${s.key}" placeholder="${s.label}" />`;
+    }
+    return `<input type="text" id="setting-${s.key}" value="${(s.value||'').replace(/"/g,'&quot;')}" data-key="${s.key}" placeholder="${s.label}" />`;
+  }
+
+  function renderSettingsInto(containerId, settings) {
     const groups = {};
     settings.forEach(s => {
       if (!groups[s.group_name]) groups[s.group_name] = [];
       groups[s.group_name].push(s);
     });
-
-    document.getElementById('settings-container').innerHTML = Object.entries(groups).map(([group, items]) => `
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = Object.entries(groups).map(([group, items]) => `
       <div class="settings-group">
         <div class="settings-group-header">
           <span class="settings-group-title">${group}</span>
@@ -1279,28 +1367,192 @@
           ${items.map(s => `
             <div class="settings-row">
               <label for="setting-${s.key}">${s.label}</label>
-              ${s.type === 'color'
-                ? `<input type="color" id="setting-${s.key}" value="${s.value||'#141414'}" data-key="${s.key}" />`
-                : s.type === 'number'
-                ? `<input type="number" id="setting-${s.key}" value="${s.value||''}" data-key="${s.key}" placeholder="${s.label}" />`
-                : `<input type="text" id="setting-${s.key}" value="${s.value||''}" data-key="${s.key}" placeholder="${s.label}" />`}
+              ${settingInputHTML(s)}
             </div>`).join('')}
         </div>
-      </div>`).join('');
+      </div>`).join('') || '';
   }
 
-  async function saveSettings() {
-    const inputs = document.querySelectorAll('#settings-container [data-key]');
+  async function saveSettingsFrom(containerId) {
+    const inputs = document.querySelectorAll('#'+containerId+' [data-key]');
     const updates = [];
     inputs.forEach(input => {
+      const val = input.dataset.type === 'boolean' ? String(input.checked) : input.value;
       updates.push(
-        sb.from('page_settings').update({ value: input.value }).eq('key', input.dataset.key)
+        sb.from('page_settings').update({ value: val }).eq('key', input.dataset.key)
       );
     });
     const results = await Promise.all(updates);
     const hasError = results.some(r => r.error);
-    if (hasError) { toast('Error al guardar configuración', 'error'); }
-    else { toast('Configuración guardada ✓', 'success'); loadSettings(); }
+    if (hasError) { toast('Error al guardar', 'error'); }
+    else { toast('Guardado ✓', 'success'); loadSettings(); if (containerId === 'marketing-settings-container') renderFeaturedChecklist(); }
+  }
+
+  async function saveSettings() { return saveSettingsFrom('settings-container'); }
+
+  // ── HERO SLIDES ──
+  let heroSlides = [];
+  async function loadHeroSlides() {
+    const { data, error } = await sb.from('hero_slides').select('*').order('sort_order');
+    if (error) { toast('Error cargando banners', 'error'); return; }
+    heroSlides = data || [];
+    renderHeroSlides();
+  }
+  function renderHeroSlides() {
+    document.getElementById('hero-slides-list').innerHTML = heroSlides.map(function(sl, idx) {
+      return '<div class="card" style="margin-bottom:14px;border:1.5px solid var(--gray-200)">' +
+        '<div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">' +
+          '<div style="display:flex;gap:10px;align-items:center">' +
+            '<span style="font-size:12px;font-weight:700;color:var(--gray-600)">Banner ' + (idx+1) + '</span>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:auto">' +
+              '<input type="checkbox" ' + (sl.active!==false?'checked':'') + ' onchange="updateSlideField(' + idx + ',\'active\',this.checked)" /> Activo' +
+            '</label>' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteSlideRow(' + idx + ')">✕</button>' +
+          '</div>' +
+          '<input type="text" placeholder="URL de imagen de fondo" value="' + (sl.image_url||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'image_url\',this.value)" style="padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:var(--font)" />' +
+          '<input type="text" placeholder="Eyebrow (texto pequeño arriba del título)" value="' + (sl.eyebrow||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'eyebrow\',this.value)" style="padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:var(--font)" />' +
+          '<input type="text" placeholder="Título" value="' + (sl.title||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'title\',this.value)" style="padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-weight:700;font-family:var(--font)" />' +
+          '<textarea placeholder="Subtítulo" oninput="updateSlideField(' + idx + ',\'subtitle\',this.value)" style="padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;min-height:50px;font-family:var(--font)">' + (sl.subtitle||'') + '</textarea>' +
+          '<div style="display:flex;gap:10px">' +
+            '<input type="text" placeholder="Texto botón 1" value="' + (sl.button1_text||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'button1_text\',this.value)" style="flex:1;padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:var(--font)" />' +
+            '<input type="text" placeholder="Link botón 1 (ej: #productos)" value="' + (sl.button1_link||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'button1_link\',this.value)" style="flex:1;padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:var(--font)" />' +
+          '</div>' +
+          '<div style="display:flex;gap:10px">' +
+            '<input type="text" placeholder="Texto botón 2 (opcional)" value="' + (sl.button2_text||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'button2_text\',this.value)" style="flex:1;padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:var(--font)" />' +
+            '<input type="text" placeholder="Link botón 2" value="' + (sl.button2_link||'').replace(/"/g,'&quot;') + '" oninput="updateSlideField(' + idx + ',\'button2_link\',this.value)" style="flex:1;padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:var(--font)" />' +
+          '</div>' +
+        '</div></div>';
+    }).join('') || '<p style="color:var(--gray-400);font-size:13px">Sin banners cargados. Agregá uno para empezar.</p>';
+  }
+  function addSlideRow() {
+    heroSlides.push({ image_url:'', eyebrow:'', title:'', subtitle:'', button1_text:'', button1_link:'', button2_text:'', button2_link:'', sort_order: heroSlides.length, active:true });
+    renderHeroSlides();
+  }
+  function updateSlideField(idx, field, value) { heroSlides[idx][field] = value; }
+  async function deleteSlideRow(idx) {
+    const sl = heroSlides[idx];
+    if (sl.id) {
+      if (!confirm('¿Eliminar este banner?')) return;
+      const r = await sb.from('hero_slides').delete().eq('id', sl.id);
+      if (r.error) { toast('Error al eliminar', 'error'); return; }
+    }
+    heroSlides.splice(idx, 1);
+    renderHeroSlides();
+    toast('Banner eliminado', 'success');
+  }
+  async function saveHeroSlides() {
+    const fields = ['image_url','eyebrow','title','subtitle','button1_text','button1_link','button2_text','button2_link'];
+    const toInsert = heroSlides.filter(s => !s.id).map((s, i) => {
+      const row = { sort_order: i, active: s.active !== false };
+      fields.forEach(f => row[f] = s[f] || '');
+      return row;
+    });
+    const toUpdate = heroSlides.filter(s => s.id);
+    let hasError = false;
+    if (toInsert.length) { const r = await sb.from('hero_slides').insert(toInsert); if (r.error) hasError = true; }
+    for (const s of toUpdate) {
+      const row = { active: s.active !== false };
+      fields.forEach(f => row[f] = s[f] || '');
+      const r = await sb.from('hero_slides').update(row).eq('id', s.id);
+      if (r.error) hasError = true;
+    }
+    if (hasError) toast('Error al guardar banners', 'error'); else toast('Banners guardados ✓', 'success');
+    loadHeroSlides();
+  }
+
+  // ── CUPONES ──
+  let coupons = [];
+  async function loadCoupons() {
+    const { data, error } = await sb.from('coupons').select('*').order('created_at', { ascending:false });
+    if (error) { toast('Error cargando cupones', 'error'); return; }
+    coupons = data || [];
+    renderCoupons();
+  }
+  function renderCoupons() {
+    if (!coupons.length) {
+      document.getElementById('coupons-list').innerHTML = '<p style="color:var(--gray-400);font-size:13px">Sin cupones cargados.</p>';
+      return;
+    }
+    var rows = coupons.map(function(c, idx) {
+      return '<tr>' +
+        '<td style="padding:6px 8px"><input type="text" value="' + (c.code||'').replace(/"/g,'&quot;') + '" oninput="updateCouponField(' + idx + ',\'code\',this.value.toUpperCase())" style="width:110px;padding:6px 8px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;text-transform:uppercase;font-family:var(--font)" placeholder="VERANO20" /></td>' +
+        '<td style="padding:6px 8px"><select onchange="updateCouponField(' + idx + ',\'discount_type\',this.value)" style="padding:6px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;font-family:var(--font)">' +
+          '<option value="percent" ' + (c.discount_type!=='fixed'?'selected':'') + '>%</option>' +
+          '<option value="fixed" ' + (c.discount_type==='fixed'?'selected':'') + '>$ fijo</option>' +
+        '</select></td>' +
+        '<td style="padding:6px 8px"><input type="number" value="' + (c.discount_value||0) + '" oninput="updateCouponField(' + idx + ',\'discount_value\',parseFloat(this.value)||0)" style="width:80px;padding:6px 8px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;font-family:var(--font)" /></td>' +
+        '<td style="padding:6px 8px"><input type="number" value="' + (c.min_purchase||0) + '" oninput="updateCouponField(' + idx + ',\'min_purchase\',parseFloat(this.value)||0)" style="width:90px;padding:6px 8px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;font-family:var(--font)" /></td>' +
+        '<td style="padding:6px 8px"><input type="number" value="' + (c.usage_limit==null?'':c.usage_limit) + '" placeholder="∞" oninput="updateCouponField(' + idx + ',\'usage_limit\',this.value===\'\'?null:(parseInt(this.value)||0))" style="width:70px;padding:6px 8px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;font-family:var(--font)" /></td>' +
+        '<td style="padding:6px 8px;font-size:12px;color:var(--gray-600);text-align:center">' + (c.used_count||0) + '</td>' +
+        '<td style="padding:6px 8px"><input type="date" value="' + (c.expires_at ? c.expires_at.slice(0,10) : '') + '" oninput="updateCouponField(' + idx + ',\'expires_at\',this.value?this.value+\'T23:59:59\':null)" style="padding:6px 8px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;font-family:var(--font)" /></td>' +
+        '<td style="padding:6px 8px;text-align:center"><input type="checkbox" ' + (c.active!==false?'checked':'') + ' onchange="updateCouponField(' + idx + ',\'active\',this.checked)" /></td>' +
+        '<td style="padding:6px 8px"><button class="btn btn-danger btn-sm" onclick="deleteCouponRow(' + idx + ')">✕</button></td>' +
+      '</tr>';
+    }).join('');
+    document.getElementById('coupons-list').innerHTML =
+      '<table><thead><tr>' +
+        '<th>Código</th><th>Tipo</th><th>Valor</th><th>Mín. compra</th><th>Límite usos</th><th>Usados</th><th>Vence</th><th>Activo</th><th></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+  function addCouponRow() {
+    coupons.unshift({ code:'', discount_type:'percent', discount_value:10, min_purchase:0, usage_limit:null, active:true, expires_at:null });
+    renderCoupons();
+  }
+  function updateCouponField(idx, field, value) { coupons[idx][field] = value; }
+  async function deleteCouponRow(idx) {
+    const c = coupons[idx];
+    if (c.id) {
+      if (!confirm('¿Eliminar este cupón?')) return;
+      const r = await sb.from('coupons').delete().eq('id', c.id);
+      if (r.error) { toast('Error al eliminar', 'error'); return; }
+    }
+    coupons.splice(idx, 1);
+    renderCoupons();
+    toast('Cupón eliminado', 'success');
+  }
+  async function saveCoupons() {
+    const rows = coupons.filter(c => (c.code||'').trim());
+    const toInsert = rows.filter(c => !c.id).map(c => ({
+      code: c.code.trim().toUpperCase(), discount_type: c.discount_type||'percent',
+      discount_value: c.discount_value||0, min_purchase: c.min_purchase||0,
+      usage_limit: c.usage_limit, active: c.active!==false, expires_at: c.expires_at||null,
+    }));
+    const toUpdate = rows.filter(c => c.id);
+    let hasError = false, errMsg = '';
+    if (toInsert.length) { const r = await sb.from('coupons').insert(toInsert); if (r.error) { hasError = true; errMsg = r.error.message; } }
+    for (const c of toUpdate) {
+      const r = await sb.from('coupons').update({
+        code: c.code.trim().toUpperCase(), discount_type: c.discount_type||'percent',
+        discount_value: c.discount_value||0, min_purchase: c.min_purchase||0,
+        usage_limit: c.usage_limit, active: c.active!==false, expires_at: c.expires_at||null,
+      }).eq('id', c.id);
+      if (r.error) { hasError = true; errMsg = r.error.message; }
+    }
+    if (hasError) toast('Error al guardar cupones' + (errMsg ? ': ' + errMsg : ''), 'error'); else toast('Cupones guardados ✓', 'success');
+    loadCoupons();
+  }
+
+  // ── PRODUCTOS DESTACADOS (carrusel home) ──
+  function renderFeaturedChecklist() {
+    const el = document.getElementById('featured-products-list');
+    if (!el) return;
+    if (!allProducts.length) { el.innerHTML = '<p style="color:var(--gray-400);font-size:13px">Sin productos.</p>'; return; }
+    el.innerHTML = allProducts.map(function(p) {
+      const img = (p.images && p.images[0]) ? p.images[0] : '';
+      return '<label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:13px;cursor:pointer">' +
+        '<input type="checkbox" ' + (p.featured?'checked':'') + ' onchange="toggleFeatured(\'' + p.id + '\', this.checked)" />' +
+        (img ? '<img src="' + img + '" style="width:32px;height:32px;object-fit:cover;border-radius:4px" />' : '<div style="width:32px;height:32px;background:var(--gray-100);border-radius:4px"></div>') +
+        '<span style="flex:1">' + p.name + '</span>' +
+        '<span style="color:var(--gray-400)">' + money(p.price) + '</span>' +
+      '</label>';
+    }).join('');
+  }
+  async function toggleFeatured(id, checked) {
+    const r = await sb.from('products').update({ featured: checked }).eq('id', id);
+    if (r.error) { toast('Error al actualizar', 'error'); return; }
+    const p = allProducts.find(function(x){ return x.id === id; });
+    if (p) p.featured = checked;
+    toast(checked ? 'Agregado a destacados ✓' : 'Quitado de destacados', 'success');
   }
 
   // ── CATEGORIES (for filter + modal select) ──
@@ -1374,7 +1626,8 @@
 
   async function init() {
     await loadCategories();
-    await Promise.all([loadDashboard(), loadProducts(), loadOrders(), loadSettings(), loadZones()]);
+    await Promise.all([loadDashboard(), loadProducts(), loadOrders(), loadSettings(), loadZones(), loadHeroSlides(), loadCoupons()]);
+    renderFeaturedChecklist();
   }
 
   init();
